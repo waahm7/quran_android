@@ -1,5 +1,10 @@
 package com.quran.labs.androidquran.widgets;
 
+import com.actionbarsherlock.internal.widget.IcsAdapterView;
+import com.actionbarsherlock.internal.widget.IcsSpinner;
+import com.quran.labs.androidquran.R;
+import com.quran.labs.androidquran.data.Constants;
+
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -17,11 +22,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
-
-import com.actionbarsherlock.internal.widget.IcsAdapterView;
-import com.actionbarsherlock.internal.widget.IcsSpinner;
-import com.quran.labs.androidquran.R;
-import com.quran.labs.androidquran.data.Constants;
 
 public class AudioStatusBar extends LinearLayout {
 
@@ -41,21 +41,27 @@ public class AudioStatusBar extends LinearLayout {
 
    private int mCurrentQari;
    private int mCurrentRepeat = 0;
-   private boolean mHaveCriticalError = false;
+    private int mGroupRepeatCount = 0;
+
+    private boolean mHaveCriticalError = false;
    private SharedPreferences mSharedPreferences;
 
    private IcsSpinner mSpinner;
    private TextView mProgressText;
    private ProgressBar mProgressBar;
    private TextView mRepeatButton;
-   private AudioBarListener mAudioBarListener;
+    private TextView mGroupRepeatButton;
+
+    private AudioBarListener mAudioBarListener;
 
    private int[] mRepeatValues = { 0, 1, 2, -1 };
-
-   public interface AudioBarListener {
+    private int[] mGroupRepeatValues = { 0,1, 2 };
+    private boolean isPaused=false;
+    public interface AudioBarListener {
       public void onPlayPressed();
       public void onPausePressed();
       public void onNextPressed();
+      public void onGroupRepeatPressed();
       public void onPreviousPressed();
       public void onStopPressed();
       public void onCancelPressed(boolean stopDownload);
@@ -77,6 +83,7 @@ public class AudioStatusBar extends LinearLayout {
    public AudioStatusBar(Context context, AttributeSet attrs, int defStyle) {
       super(context, attrs, defStyle);
       init(context);
+
    }
 
    private void init(Context context) {
@@ -215,6 +222,7 @@ public class AudioStatusBar extends LinearLayout {
               LayoutParams.MATCH_PARENT);
       params.weight = 1;
       addView(mPromptText, params);
+
       addButton(R.drawable.ic_accept);
    }
 
@@ -281,6 +289,27 @@ public class AudioStatusBar extends LinearLayout {
       mRepeatButton.setOnClickListener(mOnClickListener);
       addView(mRepeatButton, LayoutParams.WRAP_CONTENT,
               LayoutParams.MATCH_PARENT);
+
+
+//adding group repeat button
+       mGroupRepeatButton = new TextView(mContext);
+       mGroupRepeatButton.setCompoundDrawablesWithIntrinsicBounds(
+               R.drawable.ic_group_repeat, 0, 0, 0);
+       mGroupRepeatButton.setBackgroundResource(
+               R.drawable.abs__item_background_holo_dark);
+       mGroupRepeatButton.setTag(R.drawable.ic_group_repeat);
+       mGroupRepeatButton.setOnClickListener(mOnClickListener);
+       addView(mGroupRepeatButton, LayoutParams.WRAP_CONTENT,
+               LayoutParams.MATCH_PARENT);
+
+       if(mGroupRepeatCount!=0){
+
+	   String  str = mGroupRepeatValues[mGroupRepeatCount] + "";
+       mGroupRepeatButton.setText(str);
+		
+		}//cls if
+
+
    }
 
    private void addButton(int imageId){
@@ -305,10 +334,18 @@ public class AudioStatusBar extends LinearLayout {
       addView(separator, paddingParams);
    }
 
-   private void incrementRepeat(){
-      mCurrentRepeat++;
-      if (mCurrentRepeat == mRepeatValues.length){ mCurrentRepeat = 0; }
-      String str = null;
+   private void incrementRepeat() {
+     mCurrentRepeat++;
+     if (mCurrentRepeat == mRepeatValues.length) {
+       mCurrentRepeat = 0;
+     }
+
+     updateRepeatButtonText();
+
+   }
+
+   private void updateRepeatButtonText() {
+      String str;
       int value = mRepeatValues[mCurrentRepeat];
       if (value == 0){ str = ""; }
       else if (value > 0){
@@ -316,6 +353,66 @@ public class AudioStatusBar extends LinearLayout {
       }
       else { str = mContext.getString(R.string.infinity); }
       mRepeatButton.setText(str);
+   }
+
+
+    private void incrementGroupRepeat() {
+
+        mGroupRepeatCount++;
+        if (mGroupRepeatCount == 3) {
+            mGroupRepeatCount = 0;
+        }
+
+        updateGroupRepeatButtonText();
+
+    }
+
+    private void updateGroupRepeatButtonText() {
+        String str="";
+        int value =mGroupRepeatValues[mGroupRepeatCount];
+         if (value > 0){
+            str = mGroupRepeatValues[mGroupRepeatCount] + "";
+        }
+
+        mGroupRepeatButton.setText(str);
+
+    }
+
+    public void setGroupRepeatCount(int count) {
+
+        boolean updated = false;
+        for (int i=0; i<mGroupRepeatValues.length; i++) {
+            if (mGroupRepeatValues[i] == count) {
+                if (mGroupRepeatCount != i) {
+                    mGroupRepeatCount = i;
+                    updated = true;
+                }
+                break;
+            }
+        }
+
+        if (updated) {
+            updateGroupRepeatButtonText();
+        }
+
+    }
+
+
+     public void setRepeatCount(int repeatCount) {
+     boolean updated = false;
+     for (int i=0; i<mRepeatValues.length; i++) {
+       if (mRepeatValues[i] == repeatCount) {
+         if (mCurrentRepeat != i) {
+           mCurrentRepeat = i;
+           updated = true;
+         }
+         break;
+       }
+     }
+
+     if (updated) {
+       updateRepeatButtonText();
+     }
    }
 
    public void setAudioBarListener(AudioBarListener listener){
@@ -329,13 +426,16 @@ public class AudioStatusBar extends LinearLayout {
             int tag = (Integer)view.getTag();
             switch (tag){
                case R.drawable.ic_play:
+                   isPaused=false;
                   mAudioBarListener.onPlayPressed();
                   break;
                case R.drawable.ic_stop:
-                  mAudioBarListener.onStopPressed();
+                  mGroupRepeatCount=0;
+                   mAudioBarListener.onStopPressed();
                   break;
                case R.drawable.ic_pause:
-                  mAudioBarListener.onPausePressed();
+                   isPaused=true;
+                   mAudioBarListener.onPausePressed();
                   break;
                case R.drawable.ic_next:
                   mAudioBarListener.onPreviousPressed();
@@ -348,7 +448,14 @@ public class AudioStatusBar extends LinearLayout {
                   mAudioBarListener.setRepeatCount(
                           mRepeatValues[mCurrentRepeat]);
                   break;
-               case R.drawable.ic_cancel:
+                case R.drawable.ic_group_repeat:
+
+                    if(!isPaused) {
+                        incrementGroupRepeat();
+                        mAudioBarListener.onGroupRepeatPressed();
+                    }
+                    break;
+                case R.drawable.ic_cancel:
                   if (mHaveCriticalError){
                      mHaveCriticalError = false;
                      switchMode(STOPPED_MODE);

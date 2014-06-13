@@ -21,6 +21,7 @@
 package com.quran.labs.androidquran.service;
 
 import com.crashlytics.android.Crashlytics;
+import com.crashlytics.android.internal.ab;
 import com.quran.labs.androidquran.R;
 import com.quran.labs.androidquran.common.QuranAyah;
 import com.quran.labs.androidquran.data.QuranInfo;
@@ -90,10 +91,15 @@ public class AudioService extends Service implements OnCompletionListener,
            "com.quran.labs.androidquran.action.SKIP";
    public static final String ACTION_REWIND =
            "com.quran.labs.androidquran.action.REWIND";
+    public static final String ACTION_GroupRepeat =
+            "com.quran.labs.androidquran.action.GroupRepeat";
    public static final String ACTION_CONNECT =
            "com.quran.labs.androidquran.action.CONNECT";
+
    public static final String ACTION_UPDATE_REPEAT =
            "com.quran.labs.androidquran.action.UPDATE_REPEAT";
+    public static final String ACTION_UPDATE_REPEAT2 =
+            "com.quran.labs.androidquran.action.UPDATE_REPEAT";
 
    public static class AudioUpdateIntent {
       public static final String INTENT_NAME =
@@ -101,6 +107,8 @@ public class AudioService extends Service implements OnCompletionListener,
       public static final String STATUS = "status";
       public static final String SURA = "sura";
       public static final String AYAH = "ayah";
+      public static final String REPEAT_COUNT = "repeat_count";
+      public static final String GROUP_REPEAT_COUNT = "group_repeat_count";
 
       public static final int STOPPED = 0;
       public static final int PLAYING = 1;
@@ -184,7 +192,6 @@ public class AudioService extends Service implements OnCompletionListener,
    // Wifi lock that we hold when streaming files from the internet,
    // in order to prevent the device from shutting off the Wifi radio
    private WifiLock mWifiLock;
-
    // The ID we use for the notification (the onscreen alert that appears
    // at the notification area at the top of the screen as an icon -- and
    // as text as well if the user expands the notification area).
@@ -291,7 +298,10 @@ public class AudioService extends Service implements OnCompletionListener,
          else {
             int sura = -1;
             int ayah = -1;
-            int state = AudioUpdateIntent.PLAYING;
+            int repeatCount = -200;
+             int groupRepeatCount = -200;
+
+             int state = AudioUpdateIntent.PLAYING;
             if (mState == State.Paused){
                state = AudioUpdateIntent.PAUSED;
             }
@@ -299,12 +309,25 @@ public class AudioService extends Service implements OnCompletionListener,
             if (mAudioRequest != null){
                sura = mAudioRequest.getCurrentSura();
                ayah = mAudioRequest.getCurrentAyah();
+
+               final RepeatInfo repeatInfo = mAudioRequest.getRepeatInfo();
+               if (repeatInfo != null) {
+                 repeatCount = repeatInfo.getRepeatCount();
+               }
             }
+
+             if(minAyah==0)groupRepeatCount=0;
+             if(minAyah!=0)groupRepeatCount=1;
+             if(maxAyah!=0)groupRepeatCount=2;
+
 
             Intent updateIntent = new Intent(AudioUpdateIntent.INTENT_NAME);
             updateIntent.putExtra(AudioUpdateIntent.STATUS, state);
             updateIntent.putExtra(AudioUpdateIntent.SURA, sura);
             updateIntent.putExtra(AudioUpdateIntent.AYAH, ayah);
+            updateIntent.putExtra(AudioUpdateIntent.REPEAT_COUNT, repeatCount);
+            updateIntent.putExtra(AudioUpdateIntent.GROUP_REPEAT_COUNT, groupRepeatCount);
+
             mBroadcastManager.sendBroadcast(updateIntent);
          }
       }
@@ -329,6 +352,7 @@ public class AudioService extends Service implements OnCompletionListener,
       else if (action.equals(ACTION_SKIP)){ processSkipRequest(); }
       else if (action.equals(ACTION_STOP)){ processStopRequest(); }
       else if (action.equals(ACTION_REWIND)){ processRewindRequest(); }
+      else if (action.equals(ACTION_GroupRepeat)){ processGroupRepeatRequest(); }
       else if (action.equals(ACTION_UPDATE_REPEAT)){
          Serializable repeatInfo = intent.getSerializableExtra(
                  EXTRA_REPEAT_INFO);
@@ -462,7 +486,16 @@ public class AudioService extends Service implements OnCompletionListener,
             }
 
             QuranAyah repeat = mAudioRequest.setCurrentAyah(sura, updatedAyah);
-            if (repeat != null){
+
+             if(mAudioRequest.getCurrentAyah()>maxAyah&&maxAyah!=0){
+
+                 // remove any messages currently in the queue
+                 mHandler.removeCallbacksAndMessages(null);
+                 changeCurrentAyahToMinAyah();
+                 return;
+             }
+
+             if (repeat != null){
                // remove any messages currently in the queue
                mHandler.removeCallbacksAndMessages(null);
 
@@ -478,7 +511,19 @@ public class AudioService extends Service implements OnCompletionListener,
          else {
             // if we have end of sura info and we bypassed end of sura
             // line, switch the sura.
-            ayahTime = mGaplessSuraData.get(999);
+
+
+
+             if(mAudioRequest.getCurrentAyah()==maxAyah&&maxAyah !=0&&maxAyahs==maxAyah){
+                 // remove any messages currently in the queue
+                 mHandler.removeCallbacksAndMessages(null);
+                 changeCurrentAyahToMinAyah();
+
+                 return;
+             }
+
+
+             ayahTime = mGaplessSuraData.get(999);
             if (ayahTime != null && pos >= ayahTime){
                QuranAyah repeat = mAudioRequest.setCurrentAyah(sura+1, 1);
                if (repeat != null){
@@ -491,10 +536,14 @@ public class AudioService extends Service implements OnCompletionListener,
                }
                else { playAudio(); }
                return;
+
             }
          }
+//waahm7
 
-         notifyAyahChanged();
+
+
+          notifyAyahChanged();
 
          if (maxAyahs >= (updatedAyah + 1)){
             Integer t = mGaplessSuraData.get(updatedAyah + 1);
@@ -597,6 +646,80 @@ public class AudioService extends Service implements OnCompletionListener,
       }
    }
 
+    int clickCounterOnGroupRepeat=0;
+    int minAyah=0;
+    int maxAyah=0;
+    private void processGroupRepeatRequest(){
+
+
+        if(clickCounterOnGroupRepeat==2){
+            clickCounterOnGroupRepeat=0;
+            minAyah=0;
+            maxAyah=0;
+            Log.d("test","3t");
+            return;
+
+        }
+
+        if(clickCounterOnGroupRepeat==1){
+            Log.d("test","2");
+
+            maxAyah=mAudioRequest.getCurrentAyah();
+
+            clickCounterOnGroupRepeat++;
+
+            return;
+
+        }
+
+        if(clickCounterOnGroupRepeat==0){
+
+            minAyah=mAudioRequest.getCurrentAyah();
+            clickCounterOnGroupRepeat++;
+
+            Log.d("test","1");
+            return;
+
+        }
+
+
+    }
+
+
+    public void changeCurrentAyahToMinAyah(){
+
+
+        if (mState == State.Playing || mState == State.Paused){
+            int seekTo = 0;
+            int pos = mPlayer.getCurrentPosition();
+            if (mAudioRequest.isGapless()){
+                seekTo = getSeekPosition(true);
+                pos =  pos - seekTo;
+            }
+
+            if (pos > 1500){
+                mPlayer.seekTo(seekTo);
+            }
+            else {
+                tryToGetAudioFocus();
+                int sura = mAudioRequest.getCurrentSura();
+                mAudioRequest.goToMinAyah(true,minAyah);
+                if (mAudioRequest.isGapless() &&
+                        sura == mAudioRequest.getCurrentSura()){
+                    int timing = getSeekPosition(true);
+                    if (timing > -1){ mPlayer.seekTo(timing); }
+                    updateNotification(
+                            mAudioRequest.getTitle(getApplicationContext()));
+                    return;
+                }
+                playAudio();
+            }
+        }
+
+
+
+    }
+
    private void processSkipRequest() {
       if (mAudioRequest == null){ return; }
       if (mState == State.Playing || mState == State.Paused) {
@@ -608,7 +731,7 @@ public class AudioService extends Service implements OnCompletionListener,
             int timing = getSeekPosition(false);
             if (timing > -1){ mPlayer.seekTo(timing); }
             updateNotification(
-                    mAudioRequest.getTitle(getApplicationContext()));
+               mAudioRequest.getTitle(getApplicationContext()));
             return;
          }
          playAudio();
@@ -620,7 +743,12 @@ public class AudioService extends Service implements OnCompletionListener,
    }
 
    private void processStopRequest(boolean force) {
-      mHandler.removeCallbacksAndMessages(null);
+
+
+        minAyah=0;
+        maxAyah=0;
+
+       mHandler.removeCallbacksAndMessages(null);
 
       if (mState == State.Preparing){
          mShouldStop = true;
@@ -628,9 +756,11 @@ public class AudioService extends Service implements OnCompletionListener,
       }
 
       if (mState == State.Playing || mState == State.Paused || force) {
-         mState = State.Stopped;
 
-         // let go of all resources...
+
+      mState = State.Stopped;
+
+//         let go of all resources...
          relaxResources(true, true);
          giveUpAudioFocus();
 
@@ -642,10 +772,17 @@ public class AudioService extends Service implements OnCompletionListener,
            mTimingTask.cancel(true);
          }
       }
+
+
+
    }
 
    private void notifyAyahChanged(){
-      if (mAudioRequest != null){
+               if (mAudioRequest != null){
+
+
+
+
          Intent updateIntent = new Intent(AudioUpdateIntent.INTENT_NAME);
          updateIntent.putExtra(AudioUpdateIntent.STATUS,
                  AudioUpdateIntent.PLAYING);
@@ -654,6 +791,9 @@ public class AudioService extends Service implements OnCompletionListener,
          updateIntent.putExtra(AudioUpdateIntent.AYAH,
                  mAudioRequest.getCurrentAyah());
          mBroadcastManager.sendBroadcast(updateIntent);
+
+
+
       }
    }
 
@@ -667,6 +807,9 @@ public class AudioService extends Service implements OnCompletionListener,
     */
    private void relaxResources(boolean releaseMediaPlayer,
                                boolean stopForeground){
+
+
+
       if (stopForeground){
         // stop being a foreground service
         stopForeground(true);
@@ -678,6 +821,8 @@ public class AudioService extends Service implements OnCompletionListener,
          mPlayer.reset();
          mPlayer.release();
          mPlayer = null;
+        minAyah=0;
+        maxAyah=0;
       }
       
       // we can also release the Wifi lock, if we're holding it
@@ -853,8 +998,10 @@ public class AudioService extends Service implements OnCompletionListener,
    public void onCompletion(MediaPlayer player) {
       // The media player finished playing the current file, so
       // we go ahead and start the next.
-      mAudioRequest.gotoNextAyah(false);
-      playAudio();
+
+
+           mAudioRequest.gotoNextAyah(false);
+           playAudio();
    }
 
    /** Called when media player is done preparing. */
@@ -885,7 +1032,7 @@ public class AudioService extends Service implements OnCompletionListener,
       else { notifyAyahChanged(); }
 
       updateNotification(mAudioTitle);
-      configAndStartMediaPlayer();
+     configAndStartMediaPlayer();
    }
 
    /** Updates the notification. */
